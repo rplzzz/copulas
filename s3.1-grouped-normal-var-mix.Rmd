@@ -1,0 +1,62 @@
+---
+title: "Grouped t copula example"
+output: html_notebook
+---
+
+## Generating a grouped t copula
+From _Elements of Copula Modeling with R_, section 3.1, p. 96.
+
+Sample from a $t$ Copula.  The basic version of the algorithm is given as **Algorithm 3.1.8**:
+
+1. Compute the Cholesky factor $A$ of the correlation matrix $P$.
+2. Sample $Z_1 \ldots Z_d \sim N(0,1)$ (the samples are independent).
+3. Sample $W \sim IG(\nu/2, \nu/2)$, independently of $\vec{Z}$.  (The Inverse Gamma distribution
+   used here is parameterized by the shape and _rate_ parameters.)
+4. Compute $\vec{X} = \sqrt{W} A \vec{Z}$.
+5. Compute $U$ via the probability transform: $\vec{U} = (t_\nu(X_1) \ldots t_\nu(X_d)$.
+    
+The grouped version differs from the above in that each grouping gets its own value of 
+$\nu$ and $W$.  The values of $W$ are not chosen independently; that would give essentially
+no association between members of different groups.  Instead, we choose the $W$ values
+using the upper Fréchet-Hoeffding bound, $M$.  You can see how that is done in the code 
+below.
+
+```{r samplet}
+set.seed(867-5309)
+d. <- 1:4                                    # sector dimensions
+d <- sum(d.)                                 # total dimension
+nu <- rep(4^seq(2, -1), times=d.)            # degrees of freedom for each sector's copula
+n <- 1000                                    # sample size
+Z <- matrix(rnorm(n*d), ncol=n)              # dimensions in rows, samples in columns
+P <- matrix(0.5, nrow=d, ncol=d)             # correlation matrix, 0.5 corr between all components
+diag(P) <- 1
+A <- t(chol(P))                              # Right-side Cholesky factor
+Y <- t(A %*% Z)                              # Nxd matrix; each row is a vector v ~ N_D(0, P)
+U. <- runif(n)
+## Calculate a W factor for each grouping.  W is t-distributed with nu degrees of freedom.
+## (See Algorithm 3.1.8)
+## We calculate the t-variates by transforming the U. values with an inverse-gamma transform.
+## Because we use the same values of U. for each grouping, the values of W for the different
+## groupings have a joint distribution that follows the upper Frechet-Hoeffding bound (M).
+W <- sapply(nu, function(nu.) {1/qgamma(U., shape = nu./2, rate=nu./2)})
+X <- sqrt(W) * Y                             # Sqrt(W) A Z
+U <- sapply(1:d, function(j) {pt(X[,j], df=nu[j])})  # Probability transform on X; each
+                                                     # grouping gets transformed by the CDF
+                                                     # for a t-distribution with that group's
+                                                     # degrees of freedom.
+```
+
+The $\vec{U}$ above is a set of samples from a Grouped Normal Variance Mixture copula.  The
+samples have 10 dimensions, grouped into four groupings of `r d.` members, respectively.
+The number of degrees of freedom $\nu$ for the four groups are `r unique(nu)`.  The larger
+$\nu$, the less tail dependence we should see in the distribution. We can make a pairs
+plot of these samples to see how the different groups are distributed.
+
+```{r pairplot}
+cols <- matrix(1, nrow=d, ncol=d)              # colors
+start <- c(1, cumsum(head(d., n=-1)) + 1)      # indices of the grouping starts
+end <- cumsum(d.)                              # indices of the grouping ends
+for(j in seq_along(d.)) {cols[start[j]:end[j], start[j]:end[j]] <- j}   # set colors for each group
+diag(cols) <- NA
+copula::splom2(U, pch='.', pscales=0, col.mat=cols)
+```
